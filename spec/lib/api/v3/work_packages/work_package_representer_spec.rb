@@ -31,24 +31,22 @@ require 'spec_helper'
 describe ::API::V3::WorkPackages::WorkPackageRepresenter do
   include ::API::V3::Utilities::PathHelper
 
-  let(:member) { FactoryGirl.create(:user, member_in_project: project, member_through_role: role) }
+  let(:member) { FactoryGirl.build_stubbed(:user) }
   let(:current_user) { member }
   let(:embed_links) { true }
   let(:representer) do
     described_class.create(work_package, current_user: current_user, embed_links: embed_links)
   end
-
   let(:work_package) do
-    FactoryGirl.build(:work_package,
-                      id: 42,
-                      start_date: Date.today.to_datetime,
-                      due_date: Date.today.to_datetime,
-                      created_at: DateTime.now,
-                      updated_at: DateTime.now,
-                      done_ratio: 50,
-                      estimated_hours: 6.0)
+    FactoryGirl.build_stubbed(:stubbed_work_package,
+                              id: 42,
+                              start_date: Date.today.to_datetime,
+                              due_date: Date.today.to_datetime,
+                              done_ratio: 50,
+                              estimated_hours: 6.0,
+                              type: type,
+                              project: project)
   end
-  let(:project) { work_package.project }
   let(:all_permissions) do
     %i[
       view_work_packages
@@ -65,10 +63,16 @@ describe ::API::V3::WorkPackages::WorkPackageRepresenter do
     ]
   end
   let(:permissions) { all_permissions }
-  let(:role) { FactoryGirl.create :role, permissions: permissions }
+  let(:project) { FactoryGirl.build_stubbed(:project_with_types) }
+  let(:type) { project.types.first }
 
   before(:each) do
     allow(User).to receive(:current).and_return current_user
+
+    allow(current_user)
+      .to receive(:allowed_to?) do |permission, context|
+      permissions.include?(permission)
+    end
   end
 
   context 'generation' do
@@ -84,8 +88,6 @@ describe ::API::V3::WorkPackages::WorkPackageRepresenter do
         let(:raw) { work_package.description }
         let(:html) { '<p>' + work_package.description + '</p>' }
       end
-
-      it { is_expected.to have_json_path('percentageDone') }
 
       describe 'startDate' do
         it_behaves_like 'has ISO 8601 date only' do
@@ -215,11 +217,11 @@ describe ::API::V3::WorkPackages::WorkPackageRepresenter do
 
     describe 'estimatedTime' do
       let(:work_package) do
-        FactoryGirl.build(:work_package,
-                          id: 42,
-                          created_at: DateTime.now,
-                          updated_at: DateTime.now,
-                          estimated_hours: 6.5)
+        FactoryGirl.build_stubbed(:work_package,
+                                  id: 42,
+                                  created_at: DateTime.now,
+                                  updated_at: DateTime.now,
+                                  estimated_hours: 6.5)
       end
 
       it { is_expected.to be_json_eql('PT6H30M'.to_json).at_path('estimatedTime') }
@@ -552,8 +554,8 @@ describe ::API::V3::WorkPackages::WorkPackageRepresenter do
 
       context 'when the user is not watching the work package' do
         it 'should have a link to watch' do
-          expect(subject).to be_json_eql(
-                               api_v3_paths.work_package_watchers(work_package.id).to_json)
+          expect(subject)
+            .to be_json_eql(api_v3_paths.work_package_watchers(work_package.id).to_json)
             .at_path('_links/watch/href')
         end
 
@@ -568,8 +570,8 @@ describe ::API::V3::WorkPackages::WorkPackageRepresenter do
         end
 
         it 'should have a link to unwatch' do
-          expect(subject).to be_json_eql(
-                               api_v3_paths.watcher(current_user.id, work_package.id).to_json)
+          expect(subject)
+            .to be_json_eql(api_v3_paths.watcher(current_user.id, work_package.id).to_json)
             .at_path('_links/unwatch/href')
         end
 

@@ -35,13 +35,14 @@ module API
 
       included do
         def to_json(*args)
-          json_rep = OpenProject::Cache.fetch(represented) do
+          json_rep = OpenProject::Cache.fetch(json_cache_key) do
             super
           end
 
           hash_rep = ::JSON::parse(json_rep)
 
           apply_link_cache_ifs(hash_rep)
+          add_uncacheable_links(hash_rep)
           apply_property_cache_ifs(hash_rep)
 
           ::JSON::dump(hash_rep)
@@ -54,28 +55,56 @@ module API
                             .link_configs
                             .select { |config, _block| config[:cache_if] }
 
-          link_conditions.each do |config, _block|
+          link_conditions.each do |(config, _block)|
             condition = config[:cache_if]
+            next if instance_exec(&condition)
+
             name = config[:rel]
 
-            displayed = instance_exec(&condition)
-
-            hash_rep['_links'].delete(name.to_s) unless displayed
+            delete_from_hash(hash_rep, '_links', name)
           end
         end
 
         def apply_property_cache_ifs(hash_rep)
           attrs = representable_attrs
-                  .select { |name, config| config[:cache_if] }
+                  .select { |_name, config| config[:cache_if] }
 
           attrs.each do |name, config|
             condition = config[:cache_if]
+            next if instance_exec(&condition)
+
             hash_name = (config[:as] && instance_exec(&config[:as])) || name
 
-            displayed = instance_exec(&condition)
-
-            hash_rep.delete(hash_name.to_s) unless displayed
+            delete_from_hash(hash_rep, config[:embedded] ? '_embedded' : nil, hash_name)
           end
+        end
+
+        def add_uncacheable_links(hash_rep)
+          link_conditions = representable_attrs['links']
+                            .link_configs
+                            .select { |config, _block| config[:uncacheable] }
+
+          link_conditions.each do |config, block|
+            name = config[:rel]
+            hash_rep['_links'][name] = instance_exec(&block)
+          end
+        end
+
+        # Overriding Roar::Hypermedia#perpare_link_for
+        # to remove the cache_if option which would otherwise
+        # be visible in the output
+        def prepare_link_for(href, options)
+          super(href, options.except(:cache_if))
+        end
+
+        def json_cache_key
+          self.class.name.to_s.split('::') + ['json', I18n.locale]
+        end
+
+        def delete_from_hash(hash, path, key)
+          pathed_hash = path ? hash[path] : hash
+
+          pathed_hash.delete(key.to_s) if pathed_hash
         end
       end
 
